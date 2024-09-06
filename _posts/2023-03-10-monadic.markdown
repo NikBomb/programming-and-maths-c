@@ -1,0 +1,95 @@
+---
+layout: post
+title:  "Monadic operations in C++23"
+date:   2023-03-10 16:00:00 +0000
+categories: [C++]
+---
+
+If you are a C++ developer, and you have not been living under a rock, you certainly know that C++23 is [finalized](https://herbsutter.com/2023/02/13/c23-pandemic-edition-is-complete-trip-report-winter-iso-c-standards-meeting-issaquah-wa-usa/)!
+One of my favourite addition is monadic operations.
+
+Before diving into the details, let's take a step back and try to define a monad. I will give a very simple (maybe incomplete) definition, that comes from a software developer perspective. For the purpose of this discussion a monad M that accepts a type T provides a set of operations:
+
+* A constructor or factory function that accepts any type `T` and "lifts" it to the monadic type.
+* An operation `transform` that takes as input a monad `M<T>` and a function 
+```cpp
+S f(T t);
+```
+and returns a `M<S>`, with `S` being the result of `f(t)`, if `M<T>` exists, or a default monadic value if `M<T>` does not exist.
+
+* An operation `and_then` that takes as as input a monad `M<T>` and a function 
+```cpp
+M<S> f(T t);
+```
+and returns a `M<S>`, with `M<S>` being the result of `f(t)`,  if `M<T>` exists, or a default monadic value if `M<T>` does not exist. 
+
+* An operation `or_else` that takes as as input a monad `M<T>` and a function, and returns `M<T>` if it exists or executes the function.
+
+If you are wondering what is the difference between `transform` and `and_then` I got you covered! Simply put, if you where to apply `transform` to a function 
+```cpp
+M<S> f(T t);
+```
+you could get the output `M<M<S>>` so `and_then` simply flattens the result of applying `f` to `t`.
+
+By this definition of monad in C++23 `optional` became a monadic type! To understand why we care let's look at a simple example.
+
+ Let's say I want to compute the square root of a number, later I will add 42 to this number. Using c++17 `optional` an implementation might look like this
+
+```cpp
+#include <cmath>
+#include <optional>
+#include <iostream>
+
+std::optional<float> my_sqrt(float x){
+    return x > 0  ? std::make_optional(sqrtf(x)) : std::nullopt; 
+}
+
+float my_add_42(float x){
+ return x + 42;
+}
+
+int main(){
+    const std::optional<float> x = 144; 
+    std::optional<float> out = std::nullopt; /* (1) */ 
+    auto sqrt_x = my_sqrt(*x); 
+    if (sqrt_x.has_value()){                 /* (2) */   
+        out = my_add_42(*sqrt_x);
+    }
+
+    std::cout << out.value_or(-1) << std::endl;  
+}
+```
+In the snippet, if x is a negative numer or `std::nullopt`, I will get `-1`, otherwise the value of the operation will be displayed. We deal with the condition that `my_sqrt` could return an empty optional by checking if the result has a value (2). This is not ideal because breaks the logic flow. Also I am forced to first initialize the `out` variable (1) and then assign a value to it. Using the power of monadic operations in c++23 we can craft a cleaner solution
+
+
+```cpp
+#include <cmath>
+#include <optional>
+#include <iostream>
+
+std::optional<float> my_sqrt(float x){
+    return x > 0  ? std::make_optional(sqrtf(x)) : std::nullopt; 
+}
+
+float my_add_42(float x){
+ return x + 42;
+}
+
+int main(){
+    const std::optional<float> x = 44;
+    const std::optional<float> out = 
+        x.and_then(my_sqrt)
+         .transform(my_add_42)
+         .or_else( [](){return std::make_optional<float>(-1); }); 
+
+    std::cout << *out << std::endl; 
+}
+```
+
+This code is functionally equivalent to the previous snippet but it has three main advantages:
+
+* Reduced use of if statements.
+* output variable is assigned in only one statement, so it can be const.
+* Easy chaining of operations leading to fluent API.
+
+`optional` is not the only type to implement monadic operations. A similar interface is implemented by `expected`, that I will describe in a future post.

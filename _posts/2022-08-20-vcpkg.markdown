@@ -1,0 +1,115 @@
+---
+layout: post
+title:  "Easy management of C++ libraries with vcpkg and CMake for Visual Studio 2022"
+date:   2022-08-20 16:30:00 +0000
+categories: [C++]
+---
+
+
+In the past month I have embarked on a journey to learn more about computer graphics, and I decided to start from OpenGL (if you are interested as well you can start from [learnopengl](https://www.learnopengl.com)). When I started a new solution for Visual Studio, I found a lot of tutorials which involved a lot (too much!) clicking around to link all the needed libraries [Set up Visual Studio for OpenGL](https://www.geeksforgeeks.org/how-to-setup-opengl-with-visual-studio-2019-on-windows-10/).  
+
+
+However it does not need to be so complicated and convoluted, and I will show you a different flow with vcpkg and CMake, that will make setup of Visual Studio solutions with external libraries extremely simple. First and foremost, download [vcpkg](https://vcpkg.io/en/getting-started.html) a multi-platform package manager for C++. Then install the libraries you need, in the case of my projects I issued:
+
+```shell
+./vcpkg install glfw3:x64-windows glfw3:x86-windows glew:x64-windows glew:x86-windows glm:x64-windows glm:x86-windows
+```
+Note that I am explicitly stating the version I want to install, because by default if no version is provided vcpkg will only install x86. This should be the output once everything is installed:
+
+```shell
+Total elapsed time: 1.581 min
+
+The package glew is compatible with built-in CMake targets:
+
+    find_package(GLEW REQUIRED)
+    target_link_libraries(main PRIVATE GLEW::GLEW)
+
+glfw3 provides CMake targets:
+    # this is heuristically generated, and may not be correct
+    find_package(glfw3 CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE glfw)
+
+glm provides CMake targets:
+    # this is heuristically generated, and may not be correct
+    find_package(glm CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE glm::glm)
+```
+
+The official guide for vcpkg suggests that once all the libraries are installed, you can make those available to Visual Studio using:
+
+```shell
+./vcpkg integrate install
+```
+
+However I am not a big fan of global environment variables so we will use a different strategy. Install [CMake](https://cmake.org/) on your machine and create a new visual studio solution using the CMake template. The new folder structure will contain a "CmakePresets.json", with variables used by CMake. Follow the snippet below and add the path to your local vcpkg in the CMAKE_TOOLCHAIN_FILE variable:
+
+```json
+{
+    "version": 3,
+    "configurePresets": [
+        {
+            "name": "windows-base",
+            "hidden": true,
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "installDir": "${sourceDir}/out/install/${presetName}",
+          "cacheVariables": {
+            "CMAKE_C_COMPILER": "cl.exe",
+            "CMAKE_CXX_COMPILER": "cl.exe",
+            "CMAKE_TOOLCHAIN_FILE" : "[ "path" to" vcpkg" ] /scripts/buildsystems/vcpkg.cmake"
+          },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "x64-debug",
+            "displayName": "x64 Debug",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x64",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "x64-release",
+            "displayName": "x64 Release",
+            "inherits": "x64-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        },
+        {
+            "name": "x86-debug",
+            "displayName": "x86 Debug",
+            "inherits": "windows-base",
+            "architecture": {
+                "value": "x86",
+                "strategy": "external"
+            },
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        },
+        {
+            "name": "x86-release",
+            "displayName": "x86 Release",
+            "inherits": "x86-debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release"
+            }
+        }
+    ]
+}
+```
+
+And... done! Now you can create your own CMakeLists.txt file and the libraries you have installed will work out of the box. If you have followed along and would like to test your environment, go to my OpenGL [repo](https://github.com/NikBomb/OpenGL/tree/master) and compile the project.
+
+As a bonus tip, you can have different versions of vcpkg installed on the same machine, with different libraries installed and just point to the vcpkg of interest using the "CMAKE_TOOLCHAIN_FILE". Sounds like we can use C++ with virtual environments a-la [Python](https://docs.python.org/3/tutorial/venv.html), how amazing is that?
+
+I hope this was informative, feel free to reach out for comments and feedback!
