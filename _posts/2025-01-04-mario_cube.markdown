@@ -5,7 +5,7 @@ date:   2025-01-04 06:00:00 +0000
 categories: [C++, Arduino]
 ---
 
-At work I have volunteered to create a demo for a STEM event with the theme of bits. I wanted to create something that would interest these young minds, but as always I wanted as well to learn frm the project myself. While scouring the web for inspiration I found different projects involving Arduino and LEDs, and this is when the inspiration came:
+I have volunteered to create a demo for a STEM event with the theme of bits. I wanted to create something that would interest these young minds, but as always I wanted as well to learn frm the project myself. While scouring the web for inspiration I found different projects involving Arduino and LEDs, and this is when the inspiration came:
 
 _create an animated led cube_
 
@@ -101,9 +101,9 @@ For the Arduino layer, after some research, I stumbled across teh FASTLed librar
 
 Since Arduino does not support parallelism, I had to resort to concurrency to animate the different panels at potentially different clocks. To do it I hae used a simple, but efficient strategy:
 
-1) Every panel has an animation refresh rate, and the last time it has refreshed in seconds. 
-2) At every Arduino loop, the current time is recorded using `millis()`.
-3) Every panel checks the last time it has refreshed against the current milliseconds, and decides if it is time to refresh.
+1. Every panel has an animation refresh rate, and the last time it has refreshed in seconds. 
+2. At every Arduino loop, the current time is recorded using `millis()`.
+3. Every panel checks the last time it has refreshed against the current milliseconds, and decides if it is time to refresh.
 
 Finally every frame is composed by 256 pixels, and every pixel is 32 bits. This amounts to a total of 1024 bytes per frame. Arduino uno has 2KB of RAM. This is not enough to save more than two frames, and I need at least 8. Therefore, the last trick has been to save the frames in the Flash memory of the Uno that has 32 KB, with ~28 KB available for user programs after bootloader overhead. More than enough for my needs.
 
