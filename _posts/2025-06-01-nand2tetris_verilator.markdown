@@ -30,36 +30,31 @@ Importantly, the clock cycle begins at the negative edge of the clock. This desi
     * The ROM returns the instruction at that address.
     * The instruction is decoded and fed through combinational logic.
     * If it is an A-instruction, the 15-bit constant is prepared for loading into the A register.
-    * If it is a C-instruction, the ALU computes the result based on the current values of the A or RAM[A] and D registers. 
+    * If it is a C-instruction, the ALU computes the result based on the current values of the A or RAM[A] and D registers.
+    * The destination is evaluated and enabling signals are sent to the respective AMD destinations.
     * The jump condition is also evaluated combinationally to determine the next PC value.
 
 2. End of Cycle (Positive Edge)
-At the rising edge of the clock, all enabled state elements are updated simultaneously:
 
-The A register is loaded either with the constant from an A-instruction or with the ALU output if specified in a C-instruction.
+   * At the rising edge of the clock, all enabled state elements are updated simultaneously:
+   * The A register is loaded either with the constant from an A-instruction or with the ALU output if specified in a   C-instruction.
+   * The D register is updated with the ALU result if the destination bits include D.
+   * The RAM is written to if the instruction specifies memory output (via M) and uses the address in the A register.
+   * The Program Counter is either incremented (by default) or updated with the value in the A register if a jump condition is met.
 
-The D register is updated with the ALU result if the destination bits include D.
-
-The RAM is written to if the instruction specifies memory output (via M) and uses the address in the A register.
-
-The Program Counter is either incremented (by default) or updated with the value in the A register if a jump condition is met.
-
-Let’s consider this Hack assembly code:
+It helps to look at these cycles with an example. Let’s consider this Hack assembly code:
 
 ```asm
-Copy
-Edit
-@10
-D;JGT
-This instruction loads the address 10 into the A register with @10, then performs a jump to address 10 only if D > 0.
+(END)
+@END
+0;JMP
 ```
 
-Assume:
-The D register currently contains a positive value.
-The Program Counter (PC) currently points to the instruction D;JGT.
-Clock Cycle Breakdown (for D;JGT)
-Phase	Time	Component	Behavior
-Start of cycle	Negative edge	PC → ROM	Instruction 1110001100000001 (D;JGT) is fetched based on PC
-Decode + ALU	ALU computes out = D; Jump condition JGT is evaluated
-End of cycle	Positive edge	A/D/PC update	No A or D update; PC is loaded with A (value = 10) due to jump
+These instructions create an infinite loop, and are used at the end of every Hack program. Assuming that the PC was at value 100, when hitting the @END. 
 
+| Cycle | Phase   | PC  | A   | Instruction | Action Taken at negedge                        |
+| ----- | ------- | --- | --- | ----------- | ---------------------------------------------- |
+| 1     | negedge | 42  | ??  | `@END`      | Decode A-instr → Prepare to set A = 42, PC + 1 |
+| 2     | negedge | 43  | 42  | `0;JMP`     | comp = 0, jump = JMP → Next PC = A = 42        |
+| 3     | negedge | 42  | 42  | `@END`      | Decode A-instr → Prepare to set A = 42, PC + 1 |
+| 4     | negedge | 43  | 42  | `0;JMP`     | comp = 0, jump = JMP → Next PC = A = 42        |
