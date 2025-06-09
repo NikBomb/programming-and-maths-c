@@ -1,16 +1,20 @@
 ---
 layout: post
 title:  "Hardware Emulation using Open Source tools: a case study using nand2Tetris"
-date:   2125-06-01 06:00:00 +0000
+date:   2025-06-09 06:00:00 +0000
 categories: [nand2tetris, SystemVerilog]
 ---
 
-Ever since I joined AMD, I developed a stronger knack for hardware and understanding better how computers work at the lowest level. Last year I started a wonderful course called [nand2Tetris: bulding a modern computer from first principles](https://www.nand2tetris.org/). I had a lot of fun going through Part I, and while the Hardware Description Language used in the class was clear and simple, I wanted to challenge my knowledge using the industry standard SystemVerilog and emulating the full computer using only Open Source Software (C++ and verilator). In this post I will walk through my learning process, from the basics of the computer to its full emulation.
+Ever since I joined AMD, I developed a deeper appreciation for hardware and understanding better how computers work at the lowest level. Last year I started a wonderful course called [nand2Tetris: bulding a modern computer from first principles](https://www.nand2tetris.org/). I had a lot of fun going through Part I, and while the Hardware Description Language used in the class was clear and simple, I wanted to challenge my knowledge using the industry standard SystemVerilog and emulating the full computer using only Open Source Software (C++ and verilator). In this post I will walk through my learning process, from the basics of the computer to its full emulation.
 
 ## Hack Computer Architecture 
 
 The nand2Tetris computer is called HACK and is based on a modified von Neumann Architercure. In a classical von Neumann architecture the memory is shared between the program and the data memory. The HACK computer splits the memory in two separate banks, one for read only part for the program (ROM), and a random access memory (RAM) for the data.
-TThe architecture consists of three key components:
+
+<img src ="/assets/images/verilator/Hack_Computer_Block_Diagram_2.png" width="500" style="display: block; margin: 0 auto">
+<em>Hack Computer Architecture. By Rleininger - Own work, CC BY-SA 4.0, https://commons.wikimedia.org/w/index.php?curid=109499961</em>
+
+The architecture consists of three key components:
 
 1. CPU: Features a minimalistic design with an Arithmetic Logic Unit (ALU) and two main registers: A (address or value) and D (data). The CPU executes one instruction per clock cycle, which drives the pace of computation. Each cycle processes an instruction—fetching it from memory, decoding it, executing it, and writing back results—all within a single tick of the clock.
 
@@ -169,4 +173,70 @@ The test files like `Register.tv` mentioned above are translated in binary from 
 
 To run the tests I have used icarus verilog and vvp, together with GTKWave to manually check the results, and the documentation with a simple example can be found [here](https://steveicarus.github.io/iverilog/usage/gtkwave.html).
 
-## Simulating the Computer using Verilator  
+## Simulating the Computer using Verilator
+
+The testbenches discussed earlier function essentially as unit tests for individual components of the architecture, as they evaluate parts in isolation rather than as an integrated system. To move beyond this and simulate the entire computer—from ROM, through the CPU, and into main memory, including peripherals like the screen and keyboard—I turned to [Verilator](https://www.veripool.org/verilator/). Verilator is an open-source tool that translates SystemVerilog modules into a high-performance C++ library, making it ideal for this kind of system-level simulation.
+
+What makes this approach especially compelling is its flexibility: by converting SystemVerilog files into a C++ dynamic library, developers can embed their hardware models directly into a native C++ application. This allows for realistic simulation of I/O devices like screens and keyboards, providing an interactive environment for system testing.
+
+To manage the build process, I used CMake both to compile the Verilated library and to link it with a C++ executable that drives the simulation.
+This C++ [code](https://github.com/NikBomb/hack_emu/blob/master/sim/main.cpp) implements a full-system simulation of the HACK computer, combining a Verilated hardware model with SDL2 for real-time screen output and keyboard input. The simulation starts by initializing Verilator and the HACK CPU model (VComputer), followed by loading a .hack binary program into the simulated ROM. The loadProgram function parses a text-based binary file line by line, converting each 16-bit instruction into a format suitable for directly populating the ROM memory in the Verilated model.
+
+```cpp
+// Load a HACK program into ROM  
+bool loadProgram(VComputer* top, const std::string& filename) {  
+    std::ifstream file(filename);  
+    if (!file.is_open()) {  
+        std::cerr << "Error: Could not open program file " << filename << std::endl;  
+        return false;  
+    }  
+      
+    std::string line;  
+    int address = 0;  
+      
+    std::cout << "Loading program " << filename << "..." << std::endl;  
+      
+    while (std::getline(file, line) && address < ROM_SIZE) {  
+        // Ignore empty lines and comments  
+        if (line.empty() || line[0] == '/') continue;  
+          
+        // Check if it's a binary string (16 characters of 0s and 1s)  
+        if (line.length() >= 16) {  
+            uint16_t instruction = 0;  
+            for (int i = 0; i < 16; i++) {  
+                if (line[i] == '1') {  
+                    instruction |= (1 << (15-i));  
+                }  
+            }  
+              
+            // Set instruction in ROM  
+            // Note: Adjust this based on your actual module interface  
+            top->Computer->rom->rom[address] = instruction;  
+            address++;  
+        }  
+    } 
+
+```
+
+What is interesting in the snippet above is how using Verilator the programmer can directly poke the ROM values. 
+
+Next, the program initializes SDL2, which is responsible for creating a window and rendering the simulated screen. SDL is set up with a window, renderer, and texture buffer that mimics the 512x256 screen resolution of the HACK computer. A pixel buffer is allocated in memory to store screen data, and a simulation loop begins. This loop cycles the hardware clock, checks for SDL events (such as keyboard or window close actions), and periodically updates the screen display from memory-mapped screen data, mimicking real hardware behavior.
+
+The updateScreen function reads from the screen_out memory array in the Verilated HACK model. Each 16-bit word represents 16 horizontal pixels. The code interprets each bit in these words as either black (on) or white (off) and writes the corresponding ARGB color value into the SDL pixel buffer. This effectively mirrors how the HACK architecture maps video memory to screen output, giving a functional graphical output from the simulated hardware.
+
+Finally, the handleKeyboard function maps SDL key events to HACK key codes, updating the keyboard input register of the Verilated model accordingly. It includes special mappings for non-ASCII keys (like arrow keys or function keys) and passes regular ASCII codes directly. When keys are released, the memory location is cleared to zero, maintaining consistent behavior. Together, these elements allow the entire system—from CPU to screen and keyboard—to be simulated as an interactive, self-contained environment.
+
+In this simulation, the clock stepping strategy is implemented manually to mimic the real hardware clock behavior. Each iteration of the main loop toggles the clk signal of the Verilated model—first setting it to 0, calling eval() to compute combinational logic and state transitions, and then setting it to 1 followed by another eval() call. This simulates a full clock cycle, as Verilator does not manage clocking internally; it expects the user to drive clock edges explicitly. This fine-grained control is essential for ensuring deterministic behavior and accurate timing within the simulated hardware environment.
+
+This manual approach offers flexibility to precisely control when screen updates and I/O interactions occur in relation to the CPU’s execution. In this case, the screen is updated every 1,000 cycles (SCREEN_UPDATE_INTERVAL), a performance-conscious choice that balances simulation speed with responsiveness in the SDL display. While Verilator can run at high simulation speed, this design adds throttling and visualization without distorting the logic simulation itself.
+
+## Results
+
+With the strategy above I was able to simulate all the programs I tried for the platform including Pong. The framerate is quite low and I think this is all down to the many levels of indirection, but it is functional.
+
+<img src ="/assets/images/verilator/Pong.png" width="500" style="display: block; margin: 0 auto">
+<em>Pong running on my Simulator</em>
+
+## Conclusions and further work
+
+I had a lot of fun with this project and I am looking forard to load this design on an FPGA and create a software emulator. 
